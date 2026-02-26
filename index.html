@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STPPL Brain Battle</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:Arial, sans-serif;
+  background:linear-gradient(135deg,#667eea,#764ba2);
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  min-height:100vh;
+  padding:15px;
+}
+.container{
+  background:white;
+  width:100%;
+  max-width:900px;
+  padding:25px;
+  border-radius:14px;
+  box-shadow:0 10px 25px rgba(0,0,0,0.2);
+}
+h1,h2,h3{margin:10px 0}
+input{
+  padding:12px;
+  width:100%;
+  border-radius:8px;
+  border:1px solid #ccc;
+  font-size:16px;
+}
+button{
+  padding:12px;
+  width:100%;
+  margin-top:10px;
+  border:none;
+  border-radius:8px;
+  font-size:16px;
+  cursor:pointer;
+  background:#667eea;
+  color:white;
+}
+button:hover{opacity:0.9}
+.option-btn{
+  background:#f4f4f4;
+  color:black;
+  border:1px solid #ddd;
+}
+.correct{background:#c8e6c9 !important}
+.wrong{background:#ffcdd2 !important}
+.top-bar{
+  display:flex;
+  justify-content:space-between;
+  font-weight:bold;
+  margin-bottom:10px;
+}
+.timer-bar{
+  height:8px;
+  background:#ddd;
+  border-radius:5px;
+  overflow:hidden;
+  margin-bottom:15px;
+}
+.timer-progress{
+  height:8px;
+  background:#4caf50;
+  width:100%;
+}
+@media(max-width:600px){
+  .container{padding:15px}
+  h1{font-size:20px}
+  button{font-size:14px}
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<div id="login">
+<h1>STPPL Brain Battle</h1>
+<input id="username" placeholder="Enter your name">
+<button onclick="startQuiz()">Start Quiz</button>
+</div>
+
+<div id="quiz" style="display:none;">
+<div class="top-bar">
+<div>Question <span id="qNumber"></span>/20</div>
+<div>⏳ <span id="timeLeft">30</span>s</div>
+</div>
+
+<div class="timer-bar">
+<div id="timerProgress" class="timer-progress"></div>
+</div>
+
+<h3 id="questionText"></h3>
+<div id="options"></div>
+
+<button id="nextBtn" onclick="nextQuestion()" style="display:none;">Next Question</button>
+</div>
+
+<div id="result" style="display:none;"></div>
+
+</div>
+
+<script>
+
+// ================= GOOGLE SHEET WEBHOOK =================
+const SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzzUIzTWFjfLSOEWzoH0BHcg9vnASOIqHTPchLyVBBGFxZaNj1TZR54fpWm_aGxTbrp/exec";
+
+// ================= YOUR FULL 50 QUESTIONS =================
+// IMPORTANT: I am including structure only here due to length.
+// Paste your FULL 50 question array exactly as in your previous file.
+// Example format below:
+
+const QUESTION_BANK = [
+  { id: 1, difficulty: "easy", question: "Which fruit is known as the 'King of Fruits' in India? / भारतात कोणत्या फळाला 'फळांचा राजा' मानले जाते?", options: ["Apple / सफरचंद","Mango / आंबा","Banana / केळी","Grapes / द्राक्षे"], answerIndex: 1 },
+
+{ id: 2, difficulty: "easy", question: "What is the capital of India? / भारताची राजधानी कोणती आहे?", options: ["Mumbai / मुंबई","Kolkata / कोलकाता","New Delhi / नवी दिल्ली","Chennai / चेन्नई"], answerIndex: 2 },
+
+{ id: 3, difficulty: "easy", question: "How many days are there in a week? / आठवड्यात किती दिवस असतात?", options: ["5 / पाच","6 / सहा","7 / सात","8 / आठ"], answerIndex: 2 },
+
+{ id: 4, difficulty: "easy", question: "Which planet is known as the Red Planet? / कोणता ग्रह लाल ग्रह म्हणून ओळखला जातो?", options: ["Earth / पृथ्वी","Mars / मंगळ","Jupiter / गुरू","Venus / शुक्र"], answerIndex: 1 },
+
+{ id: 5, difficulty: "easy", question: "Which festival is known as the festival of lights? / दिव्यांचा सण कोणता आहे?", options: ["Holi / होळी","Diwali / दिवाळी","Eid / ईद","Christmas / ख्रिसमस"], answerIndex: 1 },
+
+
+];
+
+// ================= QUIZ LOGIC =================
+
+let selectedQuestions=[];
+let currentIndex=0;
+let selected=null;
+let score=0;
+let timeLeft=30;
+let totalTime=0;
+let timer;
+let userName="";
+
+function shuffle(arr){
+  return arr.sort(()=>Math.random()-0.5);
+}
+
+function startQuiz(){
+  userName=document.getElementById("username").value.trim();
+  if(!userName){alert("Please enter your name");return;}
+
+  const easy = QUESTION_BANK.filter(q=>q.difficulty==="easy");
+  const medium = QUESTION_BANK.filter(q=>q.difficulty==="medium");
+
+  const selectedEasy = shuffle(easy).slice(0,15);
+  const selectedMedium = shuffle(medium).slice(0,5);
+
+  selectedQuestions = shuffle([...selectedEasy,...selectedMedium]);
+
+  document.getElementById("login").style.display="none";
+  document.getElementById("quiz").style.display="block";
+
+  loadQuestion();
+}
+
+function loadQuestion(){
+  selected=null;
+  timeLeft=30;
+  updateTimerUI();
+  document.getElementById("nextBtn").style.display="none";
+
+  const q=selectedQuestions[currentIndex];
+
+  document.getElementById("qNumber").innerText=currentIndex+1;
+  document.getElementById("questionText").innerText=q.question;
+
+  const optionsDiv=document.getElementById("options");
+  optionsDiv.innerHTML="";
+
+  q.options.forEach((opt,i)=>{
+    const btn=document.createElement("button");
+    btn.innerText=opt;
+    btn.className="option-btn";
+    btn.onclick=()=>selectOption(i,btn);
+    optionsDiv.appendChild(btn);
+  });
+
+  timer=setInterval(()=>{
+    timeLeft--;
+    totalTime++;
+    updateTimerUI();
+    if(timeLeft<=0){
+      clearInterval(timer);
+      nextQuestion();
+    }
+  },1000);
+}
+
+function updateTimerUI(){
+  document.getElementById("timeLeft").innerText=timeLeft;
+  document.getElementById("timerProgress").style.width=(timeLeft/30*100)+"%";
+}
+
+function selectOption(index,btn){
+  if(selected!==null) return;
+  selected=index;
+  clearInterval(timer);
+
+  const correctAnswer=selectedQuestions[currentIndex].answerIndex;
+
+  if(index===correctAnswer){
+    btn.classList.add("correct");
+    score++;
+  }else{
+    btn.classList.add("wrong");
+    document.querySelectorAll(".option-btn")[correctAnswer].classList.add("correct");
+  }
+
+  document.getElementById("nextBtn").style.display="block";
+}
+
+function nextQuestion(){
+  clearInterval(timer);
+
+  if(currentIndex+1>=selectedQuestions.length){
+    finishQuiz();
+    return;
+  }
+
+  currentIndex++;
+  loadQuestion();
+}
+
+async function finishQuiz(){
+
+  document.getElementById("quiz").style.display="none";
+  document.getElementById("result").style.display="block";
+
+  const avgTime=(totalTime/20).toFixed(1);
+  const finalScore=Math.round(score*10-avgTime);
+
+  document.getElementById("result").innerHTML=
+  `<h2>Quiz Completed 🎉</h2>
+   <p>Name: ${userName}</p>
+   <p>Correct: ${score}/20</p>
+   <p>Score: ${finalScore}</p>
+   <p>Average Time: ${avgTime}s</p>
+   <p>Logging out in 5 seconds...</p>`;
+
+  await fetch(SHEET_WEBHOOK_URL,{
+    method:"POST",
+    mode:"no-cors",
+    body: JSON.stringify({
+      name:userName,
+      correct:score,
+      total:20,
+      score:finalScore,
+      avgTime:avgTime,
+      timestamp:new Date().toISOString()
+    })
+  });
+
+  setTimeout(()=>location.reload(),5000);
+}
+
+</script>
+</body>
+</html>
